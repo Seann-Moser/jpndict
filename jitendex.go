@@ -114,8 +114,11 @@ func (j *JiTenDex) Search(search string) (*Response, error) {
 	entry, err := ParseJitendexHTML(htmlText)
 	if err == nil {
 		resp.Entry = entry
-		if j.AudioEnabled && resp.Entry.Pronunciation != nil {
-			aud, err := j.a.GetAudio(context.Background(), resp.Entry.Headword, resp.Entry.Reading)
+		if resp.Entry.Pronunciation == nil {
+			resp.Entry.Pronunciation = &Pronunciation{}
+		}
+		if j.AudioEnabled {
+			aud, err := j.a.GetAudio(context.Background(), search, resp.Entry.Reading)
 			if err == nil {
 				resp.Entry.Pronunciation.Audio = aud.Path
 			} else {
@@ -168,7 +171,7 @@ func ParseJitendexHTML(raw string) (*Entry, error) {
 		return goquery.NodeName(s) != "rt"
 	}).Text())
 
-	entry.Reading = cleanText(headline.Find(".headword rt").First().Text())
+	entry.Reading = rubyReading(headline.Find(".headword").First())
 	entry.IsPriority = headline.HasClass("priority") || headline.Find(".priority-symbol").Length() > 0
 
 	if p := parsePronunciation(doc); p != nil {
@@ -221,7 +224,7 @@ func ParseJitendexHTML(raw string) (*Entry, error) {
 				Word: cleanText(a.Find("ruby").First().Contents().FilterFunction(func(i int, s *goquery.Selection) bool {
 					return goquery.NodeName(s) != "rt"
 				}).Text()),
-				Reading:  cleanText(a.Find("rt").First().Text()),
+				Reading:  rubyReading(a),
 				Glossary: cleanText(xr.Find(".xref-glossary").Text()),
 				Href:     href,
 				TargetID: targetID,
@@ -270,4 +273,15 @@ func parsePronunciation(doc *goquery.Document) *Pronunciation {
 
 func cleanText(s string) string {
 	return strings.Join(strings.Fields(strings.TrimSpace(s)), " ")
+}
+
+func rubyReading(sel *goquery.Selection) string {
+	var parts []string
+	sel.Find("rt").Each(func(_ int, rt *goquery.Selection) {
+		text := cleanText(rt.Text())
+		if text != "" {
+			parts = append(parts, text)
+		}
+	})
+	return strings.Join(parts, "")
 }

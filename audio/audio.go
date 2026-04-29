@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -79,6 +80,11 @@ func (p *LanguagePod101) writeNegativeCache(kanji, kana string) {
 	_ = os.MkdirAll(filepath.Dir(path), 0755)
 	_ = os.WriteFile(path, []byte("miss"), 0644)
 }
+
+func (p *LanguagePod101) clearNegativeCache(kanji, kana string) {
+	_ = os.Remove(p.negativePath(kanji, kana))
+}
+
 func (p *LanguagePod101) GetAudio(ctx context.Context, kanji, kana string) (*AudioFile, error) {
 	if p.Client == nil {
 		p.Client = http.DefaultClient
@@ -87,14 +93,11 @@ func (p *LanguagePod101) GetAudio(ctx context.Context, kanji, kana string) (*Aud
 	if err := os.MkdirAll(p.CacheDir, 0755); err != nil {
 		return nil, fmt.Errorf("create audio cache dir: %w", err)
 	}
-	// 🔴 negative cache check FIRST
-	if p.isNegativeCached(kanji, kana) {
-		return nil, fmt.Errorf("audio not found (cached)")
-	}
 	sourceURL := p.buildURL(kanji, kana)
 	cachePath := filepath.Join(p.CacheDir, cacheName(kanji, kana)+".mp3")
 
 	if _, err := os.Stat(cachePath); err == nil {
+		p.clearNegativeCache(kanji, kana)
 		return &AudioFile{
 			Kanji:     kanji,
 			Kana:      kana,
@@ -103,10 +106,16 @@ func (p *LanguagePod101) GetAudio(ctx context.Context, kanji, kana string) (*Aud
 			SourceURL: sourceURL,
 		}, nil
 	}
+	// Only use the negative cache when we don't already have a real file.
+	if p.isNegativeCached(kanji, kana) {
+		return nil, fmt.Errorf("audio not found (cached)")
+	}
 
 	redirectURL, err := p.findRedirect(ctx, sourceURL)
 	if err != nil {
-		p.writeNegativeCache(kanji, kana)
+		if errors.Is(err, ErrAudioNotFound) {
+			p.writeNegativeCache(kanji, kana)
+		}
 		return nil, err
 	}
 
@@ -114,6 +123,7 @@ func (p *LanguagePod101) GetAudio(ctx context.Context, kanji, kana string) (*Aud
 		_ = os.Remove(cachePath)
 		return nil, err
 	}
+	p.clearNegativeCache(kanji, kana)
 
 	return &AudioFile{
 		Kanji:     kanji,
@@ -140,6 +150,8 @@ func (p *LanguagePod101) buildURL(kanji, kana string) string {
 	return u.String()
 }
 
+var ErrAudioNotFound = errors.New("audio not found")
+
 func (p *LanguagePod101) findRedirect(ctx context.Context, sourceURL string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
 	if err != nil {
@@ -153,12 +165,12 @@ func (p *LanguagePod101) findRedirect(ctx context.Context, sourceURL string) (st
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 300 || resp.StatusCode > 399 {
-		return "", fmt.Errorf("couldn't find audio: expected redirect, got status %s", resp.Status)
+		return "", fmt.Errorf("%w: expected redirect, got status %s", ErrAudioNotFound, resp.Status)
 	}
 
 	location := resp.Header.Get("Location")
 	if location == "" {
-		return "", fmt.Errorf("couldn't find audio: redirect missing Location header")
+		return "", fmt.Errorf("%w: redirect missing Location header", ErrAudioNotFound)
 	}
 
 	redirectURL, err := resp.Request.URL.Parse(location)
