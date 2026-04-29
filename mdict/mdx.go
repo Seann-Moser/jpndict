@@ -62,3 +62,11 @@ func (m *MDX) Lookup(key string) ([]byte, error) {
 
 	return nil, fmt.Errorf("not found: %s", key)
 }
+
+func (m *MDX) HasKey(key string) bool {
+	i := sort.Search(len(m.keyIndex), func(i int) bool {
+		return m.keyIndex[i].Key >= key
+	})
+
+	return i < len(m.keyIndex) && m.keyIndex[i].Key == key
+}

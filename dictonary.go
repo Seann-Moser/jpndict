@@ -3,6 +3,7 @@ package jpndict
 type Dictonary interface {
 	Download() error
 	Search(data string) (*Response, error)
+	SearchAll(data string) ([]*Response, error)
 }
 
 type Response struct {

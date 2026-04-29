@@ -6,7 +6,9 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/Seann-Moser/jpndict/audio"
@@ -24,6 +26,97 @@ type JiTenDex struct {
 	AudioEnabled bool
 	m            *mdict.MDX
 	a            audio.AudioProvider
+}
+
+func (j *JiTenDex) SearchAll(data string) ([]*Response, error) {
+	return j.searchAll(data, SearchAllOptions{LongestOnly: true})
+}
+
+type SearchAllOptions struct {
+	LongestOnly bool
+}
+
+// SearchAllWithOptions allows callers to choose between all substring matches
+// and the longest non-overlapping matches.
+func (j *JiTenDex) SearchAllWithOptions(data string, opts SearchAllOptions) ([]*Response, error) {
+	return j.searchAll(data, opts)
+}
+
+func (j *JiTenDex) searchAll(data string, opts SearchAllOptions) ([]*Response, error) {
+	if j.m == nil {
+		return nil, fmt.Errorf("dictionary not loaded: call Download first")
+	}
+
+	keys := searchAllKeys(data, j.m.HasKey, opts)
+	if len(keys) == 0 {
+		return nil, fmt.Errorf("not found: %s", data)
+	}
+
+	responses := make([]*Response, 0, len(keys))
+	for _, key := range keys {
+		resp, err := j.Search(key)
+		if err != nil {
+			return nil, err
+		}
+		responses = append(responses, resp)
+	}
+
+	return responses, nil
+}
+
+func searchAllKeys(input string, hasKey func(string) bool, opts SearchAllOptions) []string {
+	parts := phraseTerms(input)
+	if len(parts) <= 1 {
+		if opts.LongestOnly {
+			return longestDictionaryMatches(input, hasKey)
+		}
+		return allDictionaryMatches(input, hasKey)
+	}
+
+	keys := make([]string, 0, len(parts))
+	seen := map[string]struct{}{}
+	for _, part := range parts {
+		matches := searchPhraseTerm(part, hasKey, opts)
+		if len(matches) == 0 {
+			return nil
+		}
+		for _, match := range matches {
+			if _, ok := seen[match]; ok {
+				continue
+			}
+			keys = append(keys, match)
+			seen[match] = struct{}{}
+		}
+	}
+	return keys
+}
+
+func searchPhraseTerm(term string, hasKey func(string) bool, opts SearchAllOptions) []string {
+	term = strings.TrimSpace(term)
+	if term == "" || hasKey == nil {
+		return nil
+	}
+	if hasKey(term) {
+		return []string{term}
+	}
+	if opts.LongestOnly {
+		return longestDictionaryMatches(term, hasKey)
+	}
+	return allDictionaryMatches(term, hasKey)
+}
+
+func phraseTerms(input string) []string {
+	return strings.FieldsFunc(strings.TrimSpace(input), func(r rune) bool {
+		if unicode.IsSpace(r) {
+			return true
+		}
+		switch r {
+		case '、', '。', '，', '．', ',', '.', '!', '?', '！', '？', '・', ';', '；', ':', '：':
+			return true
+		default:
+			return false
+		}
+	})
 }
 
 func NewJiTenDex(dir string, zipFilePath string, audioEnabled bool) (Dictonary, error) {
@@ -249,6 +342,99 @@ func ParseJitendexHTML(raw string) (*Entry, error) {
 	})
 
 	return entry, nil
+}
+
+func allDictionaryMatches(input string, hasKey func(string) bool) []string {
+	if hasKey == nil {
+		return nil
+	}
+
+	runes := []rune(strings.TrimSpace(input))
+	if len(runes) == 0 {
+		return nil
+	}
+
+	type match struct {
+		key   string
+		start int
+		end   int
+	}
+
+	matches := make([]match, 0, len(runes))
+	seen := map[string]struct{}{}
+
+	for start := 0; start < len(runes); start++ {
+		for end := len(runes); end > start; end-- {
+			candidate := string(runes[start:end])
+			if !hasKey(candidate) {
+				continue
+			}
+			if _, ok := seen[candidate]; ok {
+				continue
+			}
+			matches = append(matches, match{
+				key:   candidate,
+				start: start,
+				end:   end,
+			})
+			seen[candidate] = struct{}{}
+		}
+	}
+
+	sort.SliceStable(matches, func(i, j int) bool {
+		if matches[i].start != matches[j].start {
+			return matches[i].start < matches[j].start
+		}
+		leftLen := matches[i].end - matches[i].start
+		rightLen := matches[j].end - matches[j].start
+		if leftLen != rightLen {
+			return leftLen > rightLen
+		}
+		return matches[i].key < matches[j].key
+	})
+
+	out := make([]string, 0, len(matches))
+	for _, m := range matches {
+		out = append(out, m.key)
+	}
+	return out
+}
+
+func longestDictionaryMatches(input string, hasKey func(string) bool) []string {
+	if hasKey == nil {
+		return nil
+	}
+
+	runes := []rune(strings.TrimSpace(input))
+	if len(runes) == 0 {
+		return nil
+	}
+
+	matches := make([]string, 0, len(runes))
+	seen := map[string]struct{}{}
+	for start := 0; start < len(runes); {
+		match := ""
+		for end := len(runes); end > start; end-- {
+			candidate := string(runes[start:end])
+			if hasKey(candidate) {
+				match = candidate
+				break
+			}
+		}
+
+		if match == "" {
+			start++
+			continue
+		}
+
+		if _, ok := seen[match]; !ok {
+			matches = append(matches, match)
+			seen[match] = struct{}{}
+		}
+		start += len([]rune(match))
+	}
+
+	return matches
 }
 
 func parsePronunciation(doc *goquery.Document) *Pronunciation {
