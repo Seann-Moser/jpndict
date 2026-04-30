@@ -11,8 +11,8 @@ import (
 	"unicode"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/Seann-Moser/jpndict/audio"
-	"github.com/Seann-Moser/jpndict/mdict"
+	"github.com/DarlingGoose/jpndict/audio"
+	"github.com/DarlingGoose/jpndict/mdict"
 	"golang.org/x/net/html"
 )
 
@@ -58,6 +58,7 @@ func (j *JiTenDex) searchAll(data string, opts SearchAllOptions) ([]*Response, e
 		if err != nil {
 			return nil, err
 		}
+		resp.Query = key
 		responses = append(responses, resp)
 	}
 

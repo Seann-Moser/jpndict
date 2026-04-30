@@ -1,4 +1,4 @@
-module github.com/Seann-Moser/jpndict
+module github.com/DarlingGoose/jpndict
 
 go 1.26.2
 

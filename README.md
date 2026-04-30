@@ -9,7 +9,7 @@
 ### Install
 
 ```bash
-go get github.com/Seann-Moser/jpn-dict
+go get github.com/DarlingGoose/jpn-dict
 ```
 
 ### Basic Example
@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"log"
 
-	jpndict "github.com/Seann-Moser/jpn-dict"
+	jpndict "github.com/DarlingGoose/jpn-dict"
 )
 
 func main() {
