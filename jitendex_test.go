@@ -70,6 +70,11 @@ func TestJiTenDex_Search(t *testing.T) {
 			if tc.hasAudio && (resp.Entry.Pronunciation == nil || resp.Entry.Pronunciation.Audio == "") {
 				t.Errorf("expected audio for %s", tc.search)
 			}
+			_, err = resp.PlayAudio(true)
+			if err != nil {
+				t.Errorf("failed to play:%v", err)
+				return
+			}
 		})
 	}
 }

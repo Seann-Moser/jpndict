@@ -1,5 +1,13 @@
 package jpndict
 
+import (
+	"context"
+	"errors"
+	"time"
+
+	"github.com/DarlingGoose/jpndict/audioplayer"
+)
+
 type Dictonary interface {
 	Download() error
 	Search(data string) (*Response, error)
@@ -15,6 +23,51 @@ type Response struct {
 	Raw  []byte `json:"raw,omitempty"`
 
 	Entry *Entry `json:"entry,omitempty"`
+}
+
+var (
+	ErrNoAudioFileProvided = errors.New("no audio file provided")
+)
+
+func (r *Response) PlayAudio(wait bool) (*audioplayer.Player, error) {
+	if r.Entry == nil {
+		return nil, ErrNoAudioFileProvided
+	}
+	if r.Entry.Pronunciation == nil {
+		return nil, ErrNoAudioFileProvided
+	}
+	if r.Entry.Pronunciation.Audio == "" {
+		return nil, ErrNoAudioFileProvided
+	}
+	p, err := audioplayer.NewPlayer(audioplayer.Config{Backend: audioplayer.BackendAuto})
+	if err != nil {
+		return nil, err
+	}
+	err = p.Open(context.Background(), r.Entry.Pronunciation.Audio)
+	if err != nil {
+		_ = p.Close()
+		return nil, err
+	}
+	duration, err := p.Duration()
+	if err != nil {
+		_ = p.Close()
+		return nil, err
+	}
+	err = p.Play()
+	if err != nil {
+		_ = p.Close()
+		return nil, err
+	}
+	if wait {
+		time.Sleep(duration)
+		_ = p.Close()
+	} else {
+		go func() {
+			time.Sleep(duration)
+			_ = p.Close()
+		}()
+	}
+	return nil, nil
 }
 
 type Entry struct {
