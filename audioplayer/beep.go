@@ -42,6 +42,8 @@ var (
 	beepSpeakerSampleRate beep.SampleRate
 )
 
+const beepOutputSampleRate = beep.SampleRate(44100)
+
 func NewBeepPlayer() (*BeepPlayer, error) {
 	return &BeepPlayer{
 		state:      StateIdle,
@@ -88,7 +90,7 @@ func (p *BeepPlayer) Open(ctx context.Context, path string) error {
 		return err
 	}
 
-	if err := ensureBeepSpeaker(format); err != nil {
+	if err := ensureBeepSpeaker(); err != nil {
 		_ = streamer.Close()
 		_ = f.Close()
 		return err
@@ -101,7 +103,7 @@ func (p *BeepPlayer) Open(ctx context.Context, path string) error {
 	p.state = StateReady
 
 	p.ctrl = &beep.Ctrl{
-		Streamer: p.streamer,
+		Streamer: p.playbackStreamer(),
 		Paused:   true,
 	}
 
@@ -170,8 +172,18 @@ func (p *BeepPlayer) Stop() error {
 	if p.ctrl != nil {
 		p.ctrl.Paused = true
 	}
-	_ = p.streamer.Seek(0)
+	if p.ctrl != nil {
+		p.ctrl.Streamer = nil
+	}
+	err := p.streamer.Seek(0)
+	if p.ctrl != nil {
+		p.ctrl.Streamer = p.playbackStreamer()
+	}
 	speaker.Unlock()
+
+	if err != nil {
+		return fmt.Errorf("beep seek: %w", err)
+	}
 
 	p.state = StateStopped
 	return nil
@@ -191,7 +203,15 @@ func (p *BeepPlayer) Seek(pos time.Duration) error {
 	samples := p.format.SampleRate.N(pos)
 
 	speaker.Lock()
+	wasPaused := p.ctrl != nil && p.ctrl.Paused
+	if p.ctrl != nil {
+		p.ctrl.Streamer = nil
+	}
 	err := p.streamer.Seek(samples)
+	if p.ctrl != nil {
+		p.ctrl.Streamer = p.playbackStreamer()
+		p.ctrl.Paused = wasPaused
+	}
 	speaker.Unlock()
 
 	if err != nil {
@@ -337,23 +357,27 @@ func (p *BeepPlayer) Close() error {
 	return nil
 }
 
-func ensureBeepSpeaker(format beep.Format) error {
+func (p *BeepPlayer) playbackStreamer() beep.Streamer {
+	if p.format.SampleRate == beepSpeakerSampleRate {
+		return p.streamer
+	}
+	return beep.Resample(4, p.format.SampleRate, beepSpeakerSampleRate, p.streamer)
+}
+
+func ensureBeepSpeaker() error {
 	beepSpeakerMu.Lock()
 	defer beepSpeakerMu.Unlock()
 
 	if beepSpeakerReady {
-		if beepSpeakerSampleRate != format.SampleRate {
-			return fmt.Errorf("beep speaker already initialized at %d Hz; cannot play %d Hz audio", beepSpeakerSampleRate, format.SampleRate)
-		}
 		return nil
 	}
 
-	if err := speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10)); err != nil {
+	if err := speaker.Init(beepOutputSampleRate, beepOutputSampleRate.N(time.Second/10)); err != nil {
 		return fmt.Errorf("init speaker: %w", err)
 	}
 
 	beepSpeakerReady = true
-	beepSpeakerSampleRate = format.SampleRate
+	beepSpeakerSampleRate = beepOutputSampleRate
 	return nil
 }
 
