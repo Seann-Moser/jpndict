@@ -32,10 +32,15 @@ type BeepPlayer struct {
 	path   string
 	closed bool
 
-	speakerReady bool
-	muted        bool
-	lastVolume   float64
+	muted      bool
+	lastVolume float64
 }
+
+var (
+	beepSpeakerMu         sync.Mutex
+	beepSpeakerReady      bool
+	beepSpeakerSampleRate beep.SampleRate
+)
 
 func NewBeepPlayer() (*BeepPlayer, error) {
 	return &BeepPlayer{
@@ -53,6 +58,12 @@ func (p *BeepPlayer) Open(ctx context.Context, path string) error {
 	}
 
 	if p.streamer != nil {
+		if p.ctrl != nil {
+			speaker.Lock()
+			p.ctrl.Streamer = nil
+			speaker.Unlock()
+			p.ctrl = nil
+		}
 		_ = p.streamer.Close()
 		p.streamer = nil
 	}
@@ -77,13 +88,10 @@ func (p *BeepPlayer) Open(ctx context.Context, path string) error {
 		return err
 	}
 
-	if !p.speakerReady {
-		if err := speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10)); err != nil {
-			_ = streamer.Close()
-			_ = f.Close()
-			return fmt.Errorf("init speaker: %w", err)
-		}
-		p.speakerReady = true
+	if err := ensureBeepSpeaker(format); err != nil {
+		_ = streamer.Close()
+		_ = f.Close()
+		return err
 	}
 
 	p.file = f
@@ -310,6 +318,7 @@ func (p *BeepPlayer) Close() error {
 	if p.ctrl != nil {
 		speaker.Lock()
 		p.ctrl.Paused = true
+		p.ctrl.Streamer = nil
 		speaker.Unlock()
 	}
 
@@ -325,6 +334,26 @@ func (p *BeepPlayer) Close() error {
 
 	p.closed = true
 	p.state = StateClosed
+	return nil
+}
+
+func ensureBeepSpeaker(format beep.Format) error {
+	beepSpeakerMu.Lock()
+	defer beepSpeakerMu.Unlock()
+
+	if beepSpeakerReady {
+		if beepSpeakerSampleRate != format.SampleRate {
+			return fmt.Errorf("beep speaker already initialized at %d Hz; cannot play %d Hz audio", beepSpeakerSampleRate, format.SampleRate)
+		}
+		return nil
+	}
+
+	if err := speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10)); err != nil {
+		return fmt.Errorf("init speaker: %w", err)
+	}
+
+	beepSpeakerReady = true
+	beepSpeakerSampleRate = format.SampleRate
 	return nil
 }
 
