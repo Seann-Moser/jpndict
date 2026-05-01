@@ -6,6 +6,8 @@ require (
 	github.com/PuerkitoBio/goquery v1.12.0
 	github.com/faiface/beep v1.1.0
 	github.com/go-gst/go-gst v1.4.0
+	github.com/ikawaha/kagome-dict/ipa v1.2.6
+	github.com/ikawaha/kagome/v2 v2.11.0
 	golang.org/x/net v0.53.0
 )
 
@@ -15,6 +17,7 @@ require (
 	github.com/hajimehoshi/go-mp3 v0.3.0 // indirect
 	github.com/hajimehoshi/oto v0.7.1 // indirect
 	github.com/icza/bitio v1.0.0 // indirect
+	github.com/ikawaha/kagome-dict v1.1.7 // indirect
 	github.com/jfreymuth/oggvorbis v1.0.1 // indirect
 	github.com/jfreymuth/vorbis v1.0.0 // indirect
 	github.com/mattn/go-pointer v0.0.1 // indirect
