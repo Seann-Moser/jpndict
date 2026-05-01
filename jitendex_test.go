@@ -30,10 +30,9 @@ func TestNewJiTenDex(t *testing.T) {
 }
 
 type tc struct {
-	search        string
-	expectedKana  string
-	expectedKanji string
-	hasAudio      bool
+	search       string
+	expectedKana string
+	hasAudio     bool
 }
 
 func TestJiTenDex_Search(t *testing.T) {
@@ -268,14 +267,6 @@ func TestJiTenDex_SearchAll(t *testing.T) {
 			}
 		})
 	}
-}
-
-func responseKeys(responses []*Response) []string {
-	keys := make([]string, 0, len(responses))
-	for _, resp := range responses {
-		keys = append(keys, resp.Key)
-	}
-	return keys
 }
 
 func responseHeadwords(responses []*Response) []string {

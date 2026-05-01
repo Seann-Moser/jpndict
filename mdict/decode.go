@@ -406,17 +406,6 @@ func decodeMDictBlock(buf []byte) ([]byte, error) {
 	}
 }
 
-func skipSizedTextUTF16ish(r *bytes.Reader) error {
-	var size uint16
-	if err := binary.Read(r, binary.BigEndian, &size); err != nil {
-		return err
-	}
-
-	// In many v2 MDX files this size includes the trailing null.
-	_, err := io.CopyN(io.Discard, r, int64(size))
-	return err
-}
-
 func readNullTerminatedUTF8(r *bytes.Reader) (string, error) {
 	var b []byte
 
