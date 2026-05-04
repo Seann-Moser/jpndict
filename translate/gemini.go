@@ -15,6 +15,7 @@ import (
 type GeminiConfig struct {
 	APIKey     string
 	Model      string
+	Models     []string
 	BaseURL    string
 	HTTPClient *http.Client
 
@@ -25,6 +26,7 @@ type GeminiConfig struct {
 type GeminiClient struct {
 	apiKey      string
 	model       string
+	models      []string
 	baseURL     string
 	httpClient  *http.Client
 	temperature *float64
@@ -52,6 +54,7 @@ func NewGeminiClient(cfg GeminiConfig) *GeminiClient {
 	return &GeminiClient{
 		apiKey:      cfg.APIKey,
 		model:       model,
+		models:      append([]string(nil), cfg.Models...),
 		baseURL:     strings.TrimRight(baseURL, "/"),
 		httpClient:  httpClient,
 		temperature: cfg.Temperature,
@@ -211,4 +214,14 @@ func (c *GeminiClient) SupportedLanguage() []Language {
 
 func (c *GeminiClient) IsLanguageSupported(from Language, to Language) bool {
 	return to == LanguageEnglish || to == LanguageJapanese
+}
+
+func (c *GeminiClient) SupportedModels() []string {
+	if len(c.models) > 0 {
+		return append([]string(nil), c.models...)
+	}
+	if c.model == "" {
+		return nil
+	}
+	return []string{c.model}
 }

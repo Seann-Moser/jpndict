@@ -18,6 +18,7 @@ import (
 type OllamaConfig struct {
 	BaseURL    string
 	Model      string
+	Models     []string
 	HTTPClient *http.Client
 
 	Managed     bool
@@ -33,6 +34,7 @@ type OllamaConfig struct {
 type OllamaClient struct {
 	baseURL    string
 	model      string
+	models     []string
 	httpClient *http.Client
 
 	managed bool
@@ -47,6 +49,9 @@ type OllamaClient struct {
 
 	temperature *float64
 	maxTokens   int
+
+	modelMu      sync.Mutex
+	modelEnsured bool
 }
 
 func NewOllamaClient(cfg OllamaConfig) *OllamaClient {
@@ -70,6 +75,7 @@ func NewOllamaClient(cfg OllamaConfig) *OllamaClient {
 	return &OllamaClient{
 		baseURL:     strings.TrimRight(baseURL, "/"),
 		model:       model,
+		models:      append([]string(nil), cfg.Models...),
 		httpClient:  httpClient,
 		ollamaPath:  defaultString(cfg.OllamaPath, "ollama"),
 		host:        defaultString(cfg.Host, "127.0.0.1"),
@@ -119,6 +125,23 @@ type ollamaChatResponse struct {
 	Done  bool   `json:"done"`
 }
 
+type ollamaTagsResponse struct {
+	Models []struct {
+		Name  string `json:"name"`
+		Model string `json:"model"`
+	} `json:"models"`
+}
+
+type ollamaPullRequest struct {
+	Model  string `json:"model"`
+	Stream bool   `json:"stream"`
+}
+
+type ollamaPullResponse struct {
+	Status string `json:"status,omitempty"`
+	Error  string `json:"error,omitempty"`
+}
+
 func (c *OllamaClient) Start(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -132,7 +155,7 @@ func (c *OllamaClient) Start(ctx context.Context) error {
 	}
 
 	if err := c.ping(ctx); err == nil {
-		return nil
+		return c.ensureModel(ctx)
 	}
 
 	runCtx, cancel := context.WithCancel(context.Background())
@@ -159,7 +182,7 @@ func (c *OllamaClient) Start(ctx context.Context) error {
 	deadline := time.Now().Add(c.startupWait)
 	for time.Now().Before(deadline) {
 		if err := c.ping(ctx); err == nil {
-			return nil
+			return c.ensureModel(ctx)
 		}
 
 		select {
@@ -187,6 +210,9 @@ func (c *OllamaClient) Translate(ctx context.Context, r *Request) (*Response, er
 		if err := c.Start(ctx); err != nil {
 			return nil, err
 		}
+	}
+	if err := c.ensureModel(ctx); err != nil {
+		return nil, err
 	}
 
 	options := map[string]any{}
@@ -294,6 +320,16 @@ func (c *OllamaClient) IsLanguageSupported(from Language, to Language) bool {
 	return to == LanguageEnglish || to == LanguageJapanese
 }
 
+func (c *OllamaClient) SupportedModels() []string {
+	if len(c.models) > 0 {
+		return append([]string(nil), c.models...)
+	}
+	if c.model == "" {
+		return nil
+	}
+	return []string{c.model}
+}
+
 func (c *OllamaClient) ping(ctx context.Context) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/tags", nil)
 	if err != nil {
@@ -308,6 +344,110 @@ func (c *OllamaClient) ping(ctx context.Context) error {
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("ollama ping status %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
+func (c *OllamaClient) ensureModel(ctx context.Context) error {
+	c.modelMu.Lock()
+	defer c.modelMu.Unlock()
+
+	if c.modelEnsured {
+		return nil
+	}
+
+	exists, err := c.hasModel(ctx)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		if err := c.pullModel(ctx); err != nil {
+			return err
+		}
+	}
+
+	c.modelEnsured = true
+	return nil
+}
+
+func (c *OllamaClient) hasModel(ctx context.Context) (bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/tags", nil)
+	if err != nil {
+		return false, err
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return false, err
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return false, fmt.Errorf("ollama tags status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var decoded ollamaTagsResponse
+	if err := json.Unmarshal(respBody, &decoded); err != nil {
+		return false, fmt.Errorf("ollama decode tags response: %w: %s", err, string(respBody))
+	}
+
+	for _, model := range decoded.Models {
+		if model.Name == c.model || model.Model == c.model {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+func (c *OllamaClient) pullModel(ctx context.Context) error {
+	payload := ollamaPullRequest{
+		Model:  c.model,
+		Stream: false,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/pull", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+
+	var decoded ollamaPullResponse
+	if len(respBody) > 0 {
+		if err := json.Unmarshal(respBody, &decoded); err != nil {
+			return fmt.Errorf("ollama decode pull response: %w: %s", err, string(respBody))
+		}
+	}
+
+	if decoded.Error != "" {
+		return fmt.Errorf("ollama pull error: %s", decoded.Error)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("ollama pull status %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	return nil

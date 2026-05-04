@@ -16,6 +16,7 @@ type OpenAICompatibleConfig struct {
 	BaseURL    string
 	APIKey     string
 	Model      string
+	Models     []string
 	HTTPClient *http.Client
 
 	Temperature *float64
@@ -27,6 +28,7 @@ type OpenAICompatibleClient struct {
 	baseURL    string
 	apiKey     string
 	model      string
+	models     []string
 	httpClient *http.Client
 
 	temperature *float64
@@ -51,6 +53,7 @@ func NewOpenAICompatibleClient(cfg OpenAICompatibleConfig) *OpenAICompatibleClie
 		baseURL:     strings.TrimRight(cfg.BaseURL, "/"),
 		apiKey:      cfg.APIKey,
 		model:       cfg.Model,
+		models:      append([]string(nil), cfg.Models...),
 		httpClient:  httpClient,
 		temperature: cfg.Temperature,
 		maxTokens:   cfg.MaxTokens,
@@ -185,4 +188,14 @@ func (c *OpenAICompatibleClient) SupportedLanguage() []Language {
 
 func (c *OpenAICompatibleClient) IsLanguageSupported(from Language, to Language) bool {
 	return to == LanguageEnglish || to == LanguageJapanese
+}
+
+func (c *OpenAICompatibleClient) SupportedModels() []string {
+	if len(c.models) > 0 {
+		return append([]string(nil), c.models...)
+	}
+	if c.model == "" {
+		return nil
+	}
+	return []string{c.model}
 }

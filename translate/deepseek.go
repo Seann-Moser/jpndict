@@ -2,7 +2,7 @@ package translate
 
 import "net/http"
 
-type OpenAIConfig struct {
+type DeepSeekConfig struct {
 	APIKey     string
 	Model      string
 	Models     []string
@@ -13,19 +13,19 @@ type OpenAIConfig struct {
 	MaxTokens   int
 }
 
-func NewOpenAIClient(cfg OpenAIConfig) *OpenAICompatibleClient {
+func NewDeepSeekClient(cfg DeepSeekConfig) *OpenAICompatibleClient {
 	baseURL := cfg.BaseURL
 	if baseURL == "" {
-		baseURL = "https://api.openai.com/v1"
+		baseURL = "https://api.deepseek.com"
 	}
 
 	model := cfg.Model
 	if model == "" {
-		model = "gpt-4.1-mini"
+		model = "deepseek-v4-flash"
 	}
 
 	return NewOpenAICompatibleClient(OpenAICompatibleConfig{
-		Name:        "openai",
+		Name:        "deepseek",
 		BaseURL:     baseURL,
 		APIKey:      cfg.APIKey,
 		Model:       model,

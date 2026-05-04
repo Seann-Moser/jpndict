@@ -12,6 +12,7 @@ type Translate interface {
 	Close()
 	SupportedLanguage() []Language
 	IsLanguageSupported(from Language, to Language) bool
+	SupportedModels() []string
 }
 
 type Language string
